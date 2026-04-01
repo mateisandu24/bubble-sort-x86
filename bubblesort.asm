@@ -1,152 +1,227 @@
-.MODEL SMALL
+.model small
 
-.STACK 100h
+.stack 100h
 
-.DATA
-    vector DB 10 dup(?)         ; Vectorul care va fi sortat
-    marime_vector DB ?          ; Dimensiunea vectorului, introdusa de utilizator
-    prompt_size DB 'Introduceti dimensiunea vectorului (3-9): $'
-    prompt_invalid_size DB ' Dimensiunea trebuie sa fie intre 3 si 9! Inchide si redeschide algoritmul pentru a incerca din nou.$'
-    prompt_number DB ' Introduceti un numar: $'
-    prompt_invalid_input DB ' Numarul introdus este invalid! Inchide si redeschide algoritmul pentru a incerca din nou.$'
-    mesaj_sortat DB ' Vectorul sortat este: $'
+;data definitions
+.data
+    ; array info
+    array dw 16000 dup(?) ; 16bit max size
+    array_size dw ?
 
-.CODE
-MAIN PROC
-    MOV AX, @DATA               ; Initializare clasica a segmentului de date
-    MOV DS, AX
+    ; input info    
+    input_size db 'Insert array size : $'
+    input_number db 13, 10, 'Insert number : $'
+    error_message db 13, 10, 'Invalid input, x>1 and x<16001 $'
 
-    CALL citire_vector          ; Apelare functie
+    ; output info
+    sorted_message db 13, 10, 13, 10, 'Sorted array is : $'
+    space db ' $'
 
-    LEA SI, vector              ; Pointer catre inceputul vectorului
-    MOV CL, marime_vector       ; Dimensiunea vectorului
-    DEC CL                      ; CL = array_size - 1 (numar de pasi)
+    ; buffer definition  
+    input_buffer db 7, 0, 7 dup(0)
+    buffer db 8 dup(?), '$'
+.code
 
-outer_loop:
-    PUSH CX                     ; Salveaza CX pentru bucla exterioara
-    LEA SI, vector              ; Reincarca pointerul catre inceputul vectorului
-    MOV CL, marime_vector       ; Reincarca dimensiunea vectorului
-    DEC CL                      ; CL = array_size - 1
+start: 
+; the "main" of x86
+	mov ax, @data
+	mov ds, ax                                              ; initialize data segment
 
-swap_elemente:
-    MOV AL, [SI]                ; AL = elementul curent
-    MOV BL, [SI+1]              ; BL = urmatorul element
+    read_input_size:
+	    mov ah, 09h                                         ; ah = 09h for printing a string, 
+	    lea dx, input_size                                  ; lea = load effective address of input_size("insert array size : ") into dx
+	    int 21h                                             ; call DOS interrupt to print the message
 
-    CMP AL, BL                  ; Compara elementele
-    JBE zero_modificari         ; Daca al <= bl, nu se schimba
+	    mov ah, 0ah                                         ; ah = 0ah for buffered input
+	    lea dx, input_buffer                                ; dx -> input_buffer
+	    int 21h
 
-    ; Schimba elementele folosind un registru intermediar
-    MOV DL, [SI+1]              ; DL = urmatorul element
-    MOV [SI+1], AL              ; Urmatorul element primeste valoarea curentului
-    MOV [SI], DL                ; Elementul curent primeste valoarea urmatorului
+	    call string_to_signed_number
 
-zero_modificari:
-    INC SI                      ; Treci la urmatorul element
-    LOOP swap_elemente          ; Repeta pana la sfarsitul vectorului
+	    ; comparison with bounds
+	    cmp ax, 2
+	    jl invalid_input
+	    cmp ax, 16000
+	    jg invalid_input
 
-    POP CX                      ; Restaureaza CX pentru bucla exterioara
-    LOOP outer_loop             ; Repeta bucla exterioara
+	    ; store the valid input size
+	    mov array_size, ax
+	    jmp before_read 
 
-    ; Finalizare sortare
-    MOV AH, 9                   ; Afiseaza mesajul "Vectorul sortat este"
-    LEA DX, mesaj_sortat
-    INT 21h
+    ; exception case - invalid input (x>1 or x<16001)
+    invalid_input:
+	    xor dx, dx
+	    mov ah, 09h
+	    lea dx, error_message
+	    int 21h
 
-    CALL afisare_vector_sortat  ; Afiseaza vectorul sortat
+	    jmp read_input_size
 
-    MOV AH, 4Ch                 ; Termina programul
-    INT 21h
-MAIN ENDP
+    before_read:                                           ; move array_size and set up di for storing input numbers
+	    mov cx, array_size
+	    lea di, array
 
-; Subrutina pentru citirea vectorului de la utilizator
-citire_vector:
-    MOV AH, 9                   ; Afiseaza mesajul pentru introducerea dimensiunii
-    LEA DX, prompt_size
-    INT 21h
 
-    CALL citire_cifra           ; Citeste dimensiunea
-    CMP AL, 3                   ; Verifica daca dimensiunea este intre 3...
-    JB invalid_size
-    CMP AL, 10                  ; ... si 10
-    JAE invalid_size
+    read_loop:
+		push cx
 
-    MOV marime_vector, AL       ; Salveaza dimensiunea in marime_vector
-    LEA SI, vector              ; Pointer la inceputul vectorului
-    MOV CL, marime_vector       ; Pregateste numarul de elemente de citit
+	    mov ah, 09h
+	    lea dx, input_number
+	    int 21h
 
-read_loop:
-    MOV AH, 9                   ; Afiseaza mesajul pentru introducerea unui numar
-    LEA DX, prompt_number
-    INT 21h
+	    mov ah, 0ah
+	    lea dx, input_buffer
+        int 21h
 
-    CALL citire_cifra           ; Citeste numarul
-    CMP AL, 0                   ; Verifica daca inputul este valid (>= 0)
-    JL invalid_input
-    CMP AL, 10                  ; Verifica daca inputul este valid (< 10)
-    JGE invalid_input
+	    call string_to_signed_number
 
-    MOV [SI], AL                ; Salveaza numarul in vector
-    INC SI                      ; Treci la urmatoarea pozitie
+	    mov [di], ax
+	    add di, 2
 
-    MOV AH, 2                   ; Afiseaza un spatiu dupa fiecare numar
-    MOV DL, ' '                 ; Seteaza caracterul de spatiu
-    INT 21h
+	    pop cx
+	loop read_loop
+	
+	mov cx, array_size
+	cmp cx, 1
+	jle before_output
+	dec cx
 
-    LOOP read_loop              ; Continua pana se citesc toate elementele
-    RET
+    outer_loop:                                         ; repeat passes until no swaps occur
+	    mov di, 0                                       ; di = swap flag (0 = no swaps, 1 = swaps made)
+	    push cx
+	    lea si, array
+	    mov dx, cx
 
-invalid_size:
-    MOV AH, 9                   ; Afiseaza mesajul de eroare
-    LEA DX, prompt_invalid_size
-    INT 21h
-    MOV AH, 4Ch                 ; Termina programul
-    INT 21h
+        swap_elements:
+	    	mov ax, [si]
+		    mov bx, [si+2]
 
-invalid_input:
-    MOV AH, 9                   ; Afiseaza mesajul de input invalid
-    LEA DX, prompt_invalid_input
-    INT 21h
-    MOV AH, 4Ch                 ; Termina programul
-    INT 21h
+		    cmp ax, bx
+		    jle skip_swap                               ; if ax <= bx, no swap needed
 
-; Subrutina pentru citirea unei cifre
-citire_cifra:
-    MOV AH, 1                   ; Functie DOS pentru citirea unei taste
-    INT 21h
-    CMP AL, '0'                 ; Verifica daca este in intervalul valid
-    JL invalid_digit
-    CMP AL, '9'
-    JG invalid_digit
-    SUB AL, 30h                 ; Transforma codul ASCII in valoare numerica
-    RET
+    		mov [si+2], ax                              ; swap: first element to second position
+	    	mov [si], bx                                ; swap: second element to first position
+		    mov di, 1                                   ; set flag to indicate a swap was made
 
-invalid_digit:
-    MOV AL, -1                  ; Seteaza un cod invalid
-    RET
+        skip_swap:
+	    	add si, 2
+	    	dec dx
+		    jnz swap_elements
 
-; Subrutina pentru afisarea vectorului sortat
-afisare_vector_sortat:
-    LEA SI, vector              ; Pointer la inceputul vectorului
-    MOV CL, marime_vector       ; Dimensiunea vectorului
+	    pop cx
+	    cmp di, 0
+	    je before_output
+	loop outer_loop
 
-loop_afisare:
-    MOV AL, [SI]                ; AL = elementul curent
-    CALL afisare_cifra          ; Afiseaza cifra
+        before_output:
+	        mov ah, 09h
+	        lea dx, sorted_message
+	        int 21h
 
-    MOV AH, 2                   ; Functie DOS pentru afisare caracter
-    MOV DL, ' '                 ; Afiseaza un spatiu intre numere
-    INT 21h
+	        mov cx, array_size
+	        lea si, array
 
-    INC SI                      ; Treci la urmatorul element
-    LOOP loop_afisare           ; Continua pana cand toate elementele sunt afisate
-    RET
+    loop_output:
+		push cx
 
-; Subrutina pentru afisarea unei cifre
-afisare_cifra:
-    ADD AL, 30h                 ; Transforma cifra din valoare numerica in cod ASCII
-    MOV AH, 2                   ; Functie DOS pentru afisare caracter
-    MOV DL, AL                  ; Pune caracterul in DL pentru afisare
-    INT 21h
-    RET
+		mov ax, [si]
+		call signed_number_to_string
+		
+		mov ah, 09h
+		lea dx, buffer
+		int 21h
 
-END MAIN
+		mov ah, 09h
+		lea dx, space
+		int 21h
+
+		pop cx
+		add si, 2
+
+	loop loop_output
+
+	mov ah, 4ch
+	int 21h
+
+    string_to_signed_number proc                        ; convert ASCII string to signed integer
+	    xor ax, ax                                      ; ax = result accumulator
+	    xor bx, bx
+	    mov bx, 10                                      ; bx = base (decimal)
+
+	    lea si, input_buffer
+	    add si, 2                                       ; skip buffer length bytes
+
+	    mov cl, [si]
+	    cmp cl, '-'                                     ; check for negative sign
+
+	    jne check_plus
+	    inc si
+	    jmp string_loop
+
+            check_plus:
+	            cmp cl, '+'
+	            jne string_loop
+	            inc si
+
+            string_loop:
+		        mov cl, [si]
+	            cmp cl, 0dh                         ; 0dh = carriage return (end of string)
+	            je end_string_conv
+		
+    	        sub cl, '0'                         ; convert ASCII digit to number
+	            xor ch, ch
+    
+    	        push cx
+	            imul bx                             ; ax = ax * 10
+	            pop cx
+	
+	            add ax, cx                          ; add current digit to result
+	            inc si
+            jmp string_loop
+
+
+                end_string_conv:                    ; used in string_loop
+	                cmp [input_buffer + 2], '-'     ; check if number was negative
+	                jne return_signed
+                    neg ax                          ; negate the result
+
+
+                    return_signed:                      ; used in end_string_conv
+    	                ret
+    string_to_signed_number endp
+
+    signed_number_to_string proc                        ; convert signed integer to ASCII string
+	    cmp ax, 0
+	    jge convert_positive
+	    neg ax                                          ; convert to positive for digit extraction
+	    mov byte ptr [buffer], '-'                      ; store negative sign
+	    lea di, buffer + 1                              ; start digits after sign
+	    jmp convert_number
+
+            convert_positive:                           ; used at start of procedure
+	            lea di, buffer                          ; start digits at buffer beginning
+
+            convert_number: 
+	            xor cx, cx
+	            mov bx, 10
+
+        convert_loop_inner:                             ; extract digits in reverse order
+	        xor dx, dx
+	        div bx                                      ; ax = ax / 10, dx = remainder (digit)
+	        add dl, '0'                                 ; convert digit to ASCII
+	        push dx                                     ; stack digits in reverse
+	        inc cx                                      ; count digits
+	        test ax, ax
+	    jnz convert_loop_inner
+
+        build_string:                                   ; pop digits and build string in correct order
+	        pop ax
+	        mov [di], al
+	        inc di
+	    loop build_string
+
+	    mov byte ptr [di], '$'                          ; DOS string terminator
+	    ret
+    signed_number_to_string endp
+
+end start
